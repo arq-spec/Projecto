@@ -5,8 +5,8 @@ import PermissionsManagement from './PermissionsManagement';
 import LogisticsInventory from './LogisticsInventory';
 import ApiWebhooksManagement from './ApiWebhooksManagement';
 import WhatsAppManagement from './WhatsAppManagement';
-import { generateUsername } from '../utils/userUtils';
-import { saveToFirebase } from '../firebase';
+import { generateUsername, ensureMasterAdmin } from '../utils/userUtils';
+import { saveToFirebase, loadFromFirebase } from '../firebase';
 import { 
   Shield, 
   UserX, 
@@ -37,6 +37,8 @@ import {
   Database,
   Truck,
   Upload,
+  Download,
+  ShieldAlert,
   FileText,
   UserCheck,
   CheckCircle,
@@ -122,6 +124,195 @@ export default function Administration({
   const setActiveSubTab = propSetActiveSubTab || setLocalActiveSubTab;
 
   const [logoDimensions, setLogoDimensions] = useState({ width: 100, height: 62.5 });
+
+  // Database Backup / Restore State declarations
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
+  const [restoreFileContent, setRestoreFileContent] = useState<any | null>(null);
+  const [restoreMode, setRestoreMode] = useState<'merge' | 'overwrite'>('merge');
+  const [restoreConfirmText, setRestoreConfirmText] = useState('');
+  const [showRestoreModal, setShowRestoreModal] = useState(false);
+
+  const getLocalStorageKey = (key: string): string => {
+    if (key === 'freelancers') return 'freelance_management_freelancers_v2';
+    if (key === 'tasks') return 'freelance_management_tasks_v2';
+    if (key === 'calendarEvents') return 'freelance_management_calendar_v2';
+    if (key === 'notifications') return 'freelance_management_notifications_v2';
+    if (key === 'clients') return 'freelance_management_clients_v2';
+    if (key === 'users') return 'freelance_management_users_v3';
+    if (key === 'registrationRequests') return 'freelance_management_reg_reqs';
+    if (key === 'permissions') return 'freelance_management_permissions_v2';
+    if (key === 'inventory') return 'freelance_management_inventory';
+    if (key === 'doc_catalog') return 'freelance_management_doc_catalog';
+    if (key === 'doc_projects') return 'freelance_management_doc_projects';
+    if (key === 'api_config') return 'freelance_management_api_config';
+    if (key === 'whatsapp_api_config') return 'freelance_management_whatsapp_api_config';
+    return `freelance_management_${key}`;
+  };
+
+  const updateStateInApp = (key: string, data: any) => {
+    if (key === 'users') onUpdateUsers(data);
+    else if (key === 'permissions') onUpdatePermissions(data);
+  };
+
+  const handleExportFullBackupJSON = async () => {
+    setIsBackingUp(true);
+    try {
+      const collectionsToBackup = [
+        { key: 'freelancers', source: freelancers },
+        { key: 'tasks', source: tasks },
+        { key: 'clients', source: clients },
+        { key: 'users', source: users },
+        { key: 'registrationRequests', source: registrationRequests },
+        { key: 'permissions', source: permissions },
+        { key: 'calendarEvents', source: null },
+        { key: 'notifications', source: null },
+        { key: 'inventory', source: null },
+        { key: 'doc_catalog', source: null },
+        { key: 'doc_projects', source: null },
+        { key: 'api_config', source: null },
+        { key: 'whatsapp_api_config', source: null },
+        { key: 'workstation_workspaces', source: null },
+        { key: 'workstation_columns', source: null },
+        { key: 'workstation_cards', source: null },
+        { key: 'roles', source: null },
+        { key: 'certifications', source: null }
+      ];
+
+      const backupData: Record<string, any> = {};
+
+      for (const col of collectionsToBackup) {
+        if (col.source !== null) {
+          backupData[col.key] = col.source;
+        } else {
+          try {
+            const dbVal = await loadFromFirebase(col.key);
+            if (dbVal !== null) {
+              backupData[col.key] = dbVal;
+            } else {
+              const localSaved = localStorage.getItem(getLocalStorageKey(col.key));
+              backupData[col.key] = localSaved ? JSON.parse(localSaved) : [];
+            }
+          } catch (e) {
+            console.warn(`[Backup] Failed to load ${col.key} for backup:`, e);
+            backupData[col.key] = [];
+          }
+        }
+      }
+
+      const fullPayload = {
+        app: "Frello Management Platform",
+        version: "2.5",
+        exportedAt: new Date().toISOString(),
+        databaseType: "Cloud Firestore",
+        collections: backupData
+      };
+
+      const jsonStr = JSON.stringify(fullPayload, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `frello_database_backup_${new Date().toISOString().split('T')[0]}_${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert('Erro ao gerar o arquivo de backup do banco de dados.');
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleRestoreFullBackupJSON = async () => {
+    if (!restoreFileContent || !restoreFileContent.collections) {
+      alert('Nenhum arquivo de backup válido carregado.');
+      return;
+    }
+
+    const { collections } = restoreFileContent;
+
+    if (restoreMode === 'overwrite' && restoreConfirmText !== 'RESTAURAR') {
+      alert('Por favor, digite "RESTAURAR" no campo de confirmação para autorizar a substituição completa.');
+      return;
+    }
+
+    setIsRestoring(true);
+    try {
+      const keys = Object.keys(collections);
+      
+      for (const key of keys) {
+        const importedData = collections[key];
+        if (!importedData) continue;
+
+        if (restoreMode === 'overwrite') {
+          let finalData = importedData;
+          if (key === 'users') {
+            finalData = ensureMasterAdmin(importedData);
+          }
+          await saveToFirebase(key, finalData);
+          localStorage.setItem(getLocalStorageKey(key), JSON.stringify(finalData));
+          updateStateInApp(key, finalData);
+        } else {
+          let currentData: any = null;
+          
+          if (key === 'freelancers') currentData = freelancers;
+          else if (key === 'tasks') currentData = tasks;
+          else if (key === 'clients') currentData = clients;
+          else if (key === 'users') currentData = users;
+          else if (key === 'registrationRequests') currentData = registrationRequests;
+          else if (key === 'permissions') currentData = permissions;
+          else {
+            currentData = await loadFromFirebase(key);
+            if (!currentData) {
+              const localSaved = localStorage.getItem(getLocalStorageKey(key));
+              currentData = localSaved ? JSON.parse(localSaved) : [];
+            }
+          }
+
+          let finalData = currentData;
+          if (Array.isArray(currentData) && Array.isArray(importedData)) {
+            const mergedMap = new Map();
+            currentData.forEach((item: any) => {
+              if (item && item.id) mergedMap.set(item.id, item);
+            });
+            importedData.forEach((item: any) => {
+              if (item && item.id) mergedMap.set(item.id, item);
+            });
+            finalData = Array.from(mergedMap.values());
+          } else if (currentData && importedData) {
+            finalData = { ...currentData, ...importedData };
+          } else {
+            finalData = importedData;
+          }
+
+          if (key === 'users') {
+            finalData = ensureMasterAdmin(finalData);
+          }
+
+          await saveToFirebase(key, finalData);
+          localStorage.setItem(getLocalStorageKey(key), JSON.stringify(finalData));
+          updateStateInApp(key, finalData);
+        }
+      }
+
+      alert('Restauração de banco de dados concluída com sucesso! Os dados foram sincronizados em tempo real.');
+      setShowRestoreModal(false);
+      setRestoreFileContent(null);
+      setRestoreConfirmText('');
+      
+      setTimeout(() => {
+        window.location.reload();
+      }, 800);
+    } catch (err) {
+      console.error(err);
+      alert('Erro durante a restauração de backup: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsRestoring(false);
+    }
+  };
 
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -1487,178 +1678,452 @@ export default function Administration({
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <h3 className="text-base font-semibold text-neutral-900 flex items-center gap-2">
-                  <FileSpreadsheet className="w-5 h-5 text-indigo-500" />
-                  Importação / Exportação de Talentos
+                  <Database className="w-5 h-5 text-purple-600 font-mono" />
+                  Administração do Banco de Dados & Backups Globais
                 </h3>
                 <p className="text-xs text-neutral-500 mt-1">
-                  Gerencie backups e restaure cadastros de freelancers importando ou exportando via CSV.
+                  Gerencie o armazenamento persistente em nuvem do Frello. Exporte a base completa ou faça restaurações rápidas para migração em servidores externos.
                 </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
-              {/* CSV Export */}
-              <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-5 flex flex-col justify-between items-start gap-4">
-                <div>
-                  <h4 className="text-sm font-bold text-neutral-800 mb-1">Exportar Registros</h4>
-                  <p className="text-xs text-neutral-500">
-                    Gere um arquivo CSV com todos os dados de freelancers atualmente cadastrados na base. Isso ajudará em caso de perda e para manuseio externo.
+            {/* Banco de dados - Estatísticas Atuais */}
+            <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
+              <span className="text-[10px] uppercase font-bold text-neutral-500 tracking-wider block mb-3">Estatísticas do Banco de Dados</span>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                <div className="bg-white border border-neutral-150 p-3 rounded-lg text-center shadow-xs">
+                  <span className="block text-xl font-bold text-neutral-800">{users.length}</span>
+                  <span className="text-[10px] text-neutral-450 font-bold uppercase tracking-wider">Contas de Usuário</span>
+                </div>
+                <div className="bg-white border border-neutral-150 p-3 rounded-lg text-center shadow-xs">
+                  <span className="block text-xl font-bold text-purple-600">{freelancers.length}</span>
+                  <span className="text-[10px] text-neutral-450 font-bold uppercase tracking-wider">Talentos</span>
+                </div>
+                <div className="bg-white border border-neutral-150 p-3 rounded-lg text-center shadow-xs">
+                  <span className="block text-xl font-bold text-blue-600">{tasks.length}</span>
+                  <span className="text-[10px] text-neutral-450 font-bold uppercase tracking-wider">Diárias / Projetos</span>
+                </div>
+                <div className="bg-white border border-neutral-150 p-3 rounded-lg text-center shadow-xs">
+                  <span className="block text-xl font-bold text-amber-600">{clients.length}</span>
+                  <span className="text-[10px] text-neutral-450 font-bold uppercase tracking-wider">Clientes Corp</span>
+                </div>
+                <div className="bg-white border border-neutral-150 p-3 rounded-lg text-center shadow-xs col-span-2 sm:col-span-1">
+                  <span className="block text-xl font-bold text-emerald-600">{registrationRequests.length}</span>
+                  <span className="text-[10px] text-neutral-450 font-bold uppercase tracking-wider">Aprovações Pendentes</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Painel Central de Backup e Restauração JSON */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              
+              {/* Exportação Completa JSON */}
+              <div className="bg-gradient-to-br from-purple-50/40 to-white border border-purple-100 rounded-2xl p-6 flex flex-col justify-between gap-6 shadow-xs">
+                <div className="space-y-2">
+                  <div className="w-10 h-10 bg-purple-600/10 text-purple-600 rounded-xl flex items-center justify-center">
+                    <Download className="w-5 h-5" />
+                  </div>
+                  <h4 className="text-sm font-bold text-neutral-800">Exportar Backup Completo (JSON)</h4>
+                  <p className="text-xs text-neutral-500 leading-relaxed">
+                    Baixe uma cópia de segurança instantânea contendo absolutamente todos os dados salvos em nuvem (usuários, talentos, diárias, configurações do WhatsApp, inventário e kanban). Recomendado antes de efetuar atualizações críticas ou para migrar para outro servidor.
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    const headers = [
-                      'ID', 'Nome', 'Email', 'Celular', 'CPF_CNPJ', 'RG', 
-                      'DataNascimento', 'Sexo', 'FuncaoPrincipal', 'ChavePix', 
-                      'CEP', 'Endereco', 'Numero', 'Complemento', 'Bairro', 
-                      'Cidade', 'UF', 'Ativo'
-                    ];
-                    const rows = freelancers.map(f => [
-                      f.id,
-                      f.nome,
-                      f.email || '',
-                      f.celular || '',
-                      f.cpfCif || '',
-                      f.identidadeRg || '',
-                      f.dataNascimento || '',
-                      f.sexo || '',
-                      f.funcaoPrincipal || '',
-                      f.chavePix || '',
-                      f.enderecoCep || '',
-                      f.endereco || '',
-                      f.enderecoNumero || '',
-                      f.enderecoComplemento || '',
-                      f.enderecoBairro || '',
-                      f.enderecoCidade || '',
-                      f.enderecoUf || '',
-                      f.arquivado ? 'Não' : 'Sim'
-                    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
-                    
-                    // Add BOM for Excel UTF-8 display compatibility
-                    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(','), ...rows].join('\n');
-                    const encodedUri = encodeURI(csvContent);
-                    const link = document.createElement("a");
-                    link.setAttribute("href", encodedUri);
-                    link.setAttribute("download", `freelancers_backup_${new Date().getTime()}.csv`);
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                  }}
-                  className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs py-2 px-4 rounded-lg flex items-center gap-2 transition-all cursor-pointer"
+                  disabled={isBackingUp}
+                  onClick={handleExportFullBackupJSON}
+                  className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white font-bold text-xs py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
                 >
-                  <FileSpreadsheet className="w-4 h-4" />
-                  Exportar para CSV
+                  {isBackingUp ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Processando Banco de Dados...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4" />
+                      Gerar Cópia Completa (.JSON)
+                    </>
+                  )}
                 </button>
               </div>
 
-              {/* CSV Import */}
-              <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-5 flex flex-col justify-between items-start gap-4">
-                <div>
-                  <h4 className="text-sm font-bold text-neutral-800 mb-1">Importar Registros</h4>
-                  <p className="text-xs text-neutral-500">
-                    Selecione um arquivo CSV com as mesmas colunas para restaurar a base. IDs já existentes serão ignorados e só o que for novo será inserido.
+              {/* Importação Completa JSON */}
+              <div className="bg-gradient-to-br from-indigo-50/40 to-white border border-indigo-100 rounded-2xl p-6 flex flex-col justify-between gap-6 shadow-xs">
+                <div className="space-y-2">
+                  <div className="w-10 h-10 bg-indigo-600/10 text-indigo-600 rounded-xl flex items-center justify-center">
+                    <Upload className="w-5 h-5" />
+                  </div>
+                  <h4 className="text-sm font-bold text-neutral-800">Restaurar do Backup (.JSON)</h4>
+                  <p className="text-xs text-neutral-500 leading-relaxed">
+                    Carregue um arquivo JSON gerado anteriormente para restaurar o estado completo da plataforma. Você poderá optar por mesclar as informações ou substituir todo o banco de dados atual por completo (útil para instalação do zero em ambientes externos).
                   </p>
                 </div>
-                <div>
-                  <label className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-4 rounded-lg flex items-center gap-2 transition-all cursor-pointer">
-                    <RefreshCw className="w-4 h-4" />
-                    Importar do CSV
+                
+                <div className="w-full">
+                  <label className="w-full border-2 border-dashed border-indigo-200 hover:border-indigo-400 rounded-xl py-3 px-4 flex items-center justify-center gap-2 cursor-pointer bg-indigo-50/20 text-indigo-700 text-xs font-semibold transition-all">
+                    <Upload className="w-4 h-4" />
+                    Carregar arquivo de backup...
                     <input
-                      title="Importar do CSV"
                       type="file"
-                      accept=".csv"
+                      accept=".json"
                       className="hidden"
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (!file) return;
                         const reader = new FileReader();
                         reader.onload = (event) => {
-                          const result = event.target?.result as string;
-                          if (!result) return;
                           try {
-                            const lines = result.split('\n');
-                            const rawHeaders = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').trim());
-                            
-                            // Check if BOM is there to cleanly match Headers
-                            const headers = rawHeaders.map(h => h.replace(/^\uFEFF/, ''));
-
-                            const newFreelancers: Freelancer[] = [];
-                            
-                            for (let i = 1; i < lines.length; i++) {
-                              let line = lines[i];
-                              if (!line || !line.trim()) continue;
-                              
-                              const values = [];
-                              let regex = /(".*?"|[^",]+)(?=\s*,|\s*$)/g;
-                              let match;
-                              while (match = regex.exec(line)) {
-                                values.push(match[1].replace(/^"|"$/g, '').replace(/""/g, '"').trim());
-                              }
-
-                              const getVal = (colName: string) => {
-                                const idx = headers.indexOf(colName);
-                                return idx >= 0 && idx < values.length ? values[idx] : '';
-                              };
-
-                              const id = getVal('ID');
-                              if (!id) continue;
-
-                              newFreelancers.push({
-                                id: id,
-                                nome: getVal('Nome') || 'Importado sem nome',
-                                email: getVal('Email'),
-                                celular: getVal('Celular'),
-                                cpfCif: getVal('CPF_CNPJ'),
-                                identidadeRg: getVal('RG'),
-                                dataNascimento: getVal('DataNascimento'),
-                                sexo: getVal('Sexo'),
-                                funcaoPrincipal: getVal('FuncaoPrincipal'),
-                                chavePix: getVal('ChavePix'),
-                                enderecoCep: getVal('CEP'),
-                                endereco: getVal('Endereco'),
-                                enderecoNumero: getVal('Numero'),
-                                enderecoComplemento: getVal('Complemento'),
-                                enderecoBairro: getVal('Bairro'),
-                                enderecoCidade: getVal('Cidade'),
-                                enderecoUf: getVal('UF'),
-                                arquivado: getVal('Ativo') === 'Não',
-                                fotoAtiva: '',
-                                cacheSugerido: 0,
-                                rating: 'bronze',
-                                recomendacoes: 0,
-                                dataCadastro: new Date().toLocaleDateString('pt-BR'),
-                                historicoTrabalhos: [],
-                                cargo: getVal('FuncaoPrincipal') || 'Sem Cargo',
-                                telefone: getVal('Celular') || '',
-                                cidade: getVal('Cidade') || '',
-                                habilidades: [],
-                                bio: '',
-                                valorHora: 0,
-                                avaliacoes: [],
-                                historicoProjetos: []
-                              });
+                            const parsed = JSON.parse(event.target?.result as string);
+                            if (!parsed.collections || !parsed.app) {
+                              alert('Este arquivo não parece ser um backup válido do Frello.');
+                              return;
                             }
-                            
-                            if (onBulkImportFreelancers && newFreelancers.length > 0) {
-                              onBulkImportFreelancers(newFreelancers);
-                              alert(`${newFreelancers.length} talentos foram encontrados no arquivo.`);
-                            } else {
-                              alert('Nenhum talento válido encontrado no arquivo.');
-                            }
+                            setRestoreFileContent(parsed);
+                            setRestoreMode('merge');
+                            setRestoreConfirmText('');
+                            setShowRestoreModal(true);
                           } catch (err) {
-                            console.error(err);
-                            alert('Erro ao importar CSV! Tem certeza que está no mesmo formato de exportação?');
+                            alert('Erro ao ler arquivo JSON de backup: arquivo corrompido.');
                           }
                         };
                         reader.readAsText(file);
-                        e.target.value = ''; // reset
+                        e.target.value = ''; // reset file input
                       }}
                     />
                   </label>
                 </div>
               </div>
+
             </div>
+
+            {/* Seção Tradicional de CSV */}
+            <div className="border-t border-neutral-200 pt-6 mt-6">
+              <div className="flex items-center gap-2 mb-4">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <h4 className="text-xs uppercase font-extrabold text-neutral-500 tracking-wider">Mapeamento em Lote (Excel / CSV)</h4>
+              </div>
+              <p className="text-xs text-neutral-500 mb-4 leading-relaxed">
+                As opções abaixo são específicas para exportar e importar a lista de profissionais (Talentos) em formato CSV compatível com planilhas como Excel e Google Sheets.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* CSV Export */}
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4 flex flex-col justify-between items-start gap-3">
+                  <div>
+                    <h5 className="text-xs font-bold text-neutral-800 mb-0.5">Exportar Talentos (CSV)</h5>
+                    <p className="text-[11px] text-neutral-500 leading-relaxed">
+                      Cria uma planilha CSV com dados cadastrais e de PIX dos freelancers.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const headers = [
+                        'ID', 'Nome', 'Email', 'Celular', 'CPF_CNPJ', 'RG', 
+                        'DataNascimento', 'Sexo', 'FuncaoPrincipal', 'ChavePix', 
+                        'CEP', 'Endereco', 'Numero', 'Complemento', 'Bairro', 
+                        'Cidade', 'UF', 'Ativo'
+                      ];
+                      const rows = freelancers.map(f => [
+                        f.id,
+                        f.nome,
+                        f.email || '',
+                        f.celular || '',
+                        f.cpfCif || '',
+                        f.identidadeRg || '',
+                        f.dataNascimento || '',
+                        f.sexo || '',
+                        f.funcaoPrincipal || '',
+                        f.chavePix || '',
+                        f.enderecoCep || '',
+                        f.endereco || '',
+                        f.enderecoNumero || '',
+                        f.enderecoComplemento || '',
+                        f.enderecoBairro || '',
+                        f.enderecoCidade || '',
+                        f.enderecoUf || '',
+                        f.arquivado ? 'Não' : 'Sim'
+                      ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+                      
+                      const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(','), ...rows].join('\n');
+                      const encodedUri = encodeURI(csvContent);
+                      const link = document.createElement("a");
+                      link.setAttribute("href", encodedUri);
+                      link.setAttribute("download", `freelancers_backup_${new Date().getTime()}.csv`);
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    className="bg-neutral-800 hover:bg-neutral-900 text-white font-bold text-[11px] py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    Exportar para CSV
+                  </button>
+                </div>
+
+                {/* CSV Import */}
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4 flex flex-col justify-between items-start gap-3">
+                  <div>
+                    <h5 className="text-xs font-bold text-neutral-800 mb-0.5">Importar Talentos (CSV)</h5>
+                    <p className="text-[11px] text-neutral-500 leading-relaxed">
+                      Carrega talentos a partir de uma planilha CSV no formato padronizado do Frello.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] py-1.5 px-3 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer">
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Importar do CSV
+                      <input
+                        title="Importar do CSV"
+                        type="file"
+                        accept=".csv"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            const result = event.target?.result as string;
+                            if (!result) return;
+                            try {
+                              const lines = result.split('\n');
+                              const rawHeaders = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').trim());
+                              const headers = rawHeaders.map(h => h.replace(/^\uFEFF/, ''));
+
+                              const newFreelancers: Freelancer[] = [];
+                              
+                              for (let i = 1; i < lines.length; i++) {
+                                let line = lines[i];
+                                if (!line || !line.trim()) continue;
+                                
+                                const values = [];
+                                let regex = /(".*?"|[^",]+)(?=\s*,|\s*$)/g;
+                                let match;
+                                while (match = regex.exec(line)) {
+                                  values.push(match[1].replace(/^"|"$/g, '').replace(/""/g, '"').trim());
+                                }
+
+                                const getVal = (colName: string) => {
+                                  const idx = headers.indexOf(colName);
+                                  return idx >= 0 && idx < values.length ? values[idx] : '';
+                                };
+
+                                const id = getVal('ID');
+                                if (!id) continue;
+
+                                newFreelancers.push({
+                                  id: id,
+                                  nome: getVal('Nome') || 'Importado sem nome',
+                                  email: getVal('Email'),
+                                  celular: getVal('Celular'),
+                                  cpfCif: getVal('CPF_CNPJ'),
+                                  identidadeRg: getVal('RG'),
+                                  dataNascimento: getVal('DataNascimento'),
+                                  sexo: getVal('Sexo'),
+                                  funcaoPrincipal: getVal('FuncaoPrincipal'),
+                                  chavePix: getVal('ChavePix'),
+                                  enderecoCep: getVal('CEP'),
+                                  endereco: getVal('Endereco'),
+                                  enderecoNumero: getVal('Numero'),
+                                  enderecoComplemento: getVal('Complemento'),
+                                  enderecoBairro: getVal('Bairro'),
+                                  enderecoCidade: getVal('Cidade'),
+                                  enderecoUf: getVal('UF'),
+                                  arquivado: getVal('Ativo') === 'Não',
+                                  fotoAtiva: '',
+                                  cacheSugerido: 0,
+                                  rating: 'bronze',
+                                  recomendacoes: 0,
+                                  dataCadastro: new Date().toLocaleDateString('pt-BR'),
+                                  historicoTrabalhos: [],
+                                  cargo: getVal('FuncaoPrincipal') || 'Sem Cargo',
+                                  telefone: getVal('Celular') || '',
+                                  cidade: getVal('Cidade') || '',
+                                  habilidades: [],
+                                  bio: '',
+                                  valorHora: 0,
+                                  avaliacoes: [],
+                                  historicoProjetos: []
+                                });
+                              }
+                              
+                              if (onBulkImportFreelancers && newFreelancers.length > 0) {
+                                onBulkImportFreelancers(newFreelancers);
+                                alert(`${newFreelancers.length} talentos foram encontrados no arquivo.`);
+                              } else {
+                                alert('Nenhum talento válido encontrado no arquivo.');
+                              }
+                            } catch (err) {
+                              console.error(err);
+                              alert('Erro ao importar CSV! Tem certeza que está no mesmo formato de exportação?');
+                            }
+                          };
+                          reader.readAsText(file);
+                          e.target.value = ''; // reset
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal para Confirmação do Backup JSON */}
+            <AnimatePresence>
+              {showRestoreModal && restoreFileContent && (
+                <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-4">
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="bg-white rounded-2xl max-w-lg w-full p-6 border border-neutral-200 shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden text-left text-neutral-800"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setShowRestoreModal(false)}
+                      className="absolute right-4 top-4 p-1.5 text-neutral-400 hover:text-neutral-600 rounded-lg hover:bg-neutral-100 transition-colors cursor-pointer"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+
+                    <div className="space-y-4 overflow-y-auto pr-1">
+                      <div className="flex items-center gap-2.5">
+                        <ShieldAlert className="w-6 h-6 text-indigo-600 shrink-0 animate-pulse" />
+                        <div>
+                          <h3 className="text-base font-bold text-neutral-900">Restauração do Banco de Dados</h3>
+                          <p className="text-[11px] text-neutral-500">Arquivo: frello_database_backup.json</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-indigo-50 border border-indigo-150 p-4 rounded-xl space-y-2">
+                        <span className="text-[10px] uppercase font-bold text-indigo-800 tracking-wider block">Sumário dos Dados Carregados</span>
+                        <div className="grid grid-cols-2 gap-y-2 gap-x-4 text-xs">
+                          <div className="flex justify-between border-b border-indigo-100/50 pb-1">
+                            <span className="text-neutral-500">Contas de Usuário:</span>
+                            <span className="font-bold text-neutral-800">{restoreFileContent.collections.users?.length || 0}</span>
+                          </div>
+                          <div className="flex justify-between border-b border-indigo-100/50 pb-1">
+                            <span className="text-neutral-500">Profissionais:</span>
+                            <span className="font-bold text-neutral-800">{restoreFileContent.collections.freelancers?.length || 0}</span>
+                          </div>
+                          <div className="flex justify-between border-b border-indigo-100/50 pb-1">
+                            <span className="text-neutral-500">Diárias / Projetos:</span>
+                            <span className="font-bold text-neutral-800">{restoreFileContent.collections.tasks?.length || 0}</span>
+                          </div>
+                          <div className="flex justify-between border-b border-indigo-100/50 pb-1">
+                            <span className="text-neutral-500">Clientes Corp:</span>
+                            <span className="font-bold text-neutral-800">{restoreFileContent.collections.clients?.length || 0}</span>
+                          </div>
+                          <div className="flex justify-between border-b border-indigo-100/50 pb-1 col-span-2">
+                            <span className="text-neutral-500">Módulos Extras:</span>
+                            <span className="font-bold text-indigo-700">
+                              {Object.keys(restoreFileContent.collections).filter(k => !['users', 'freelancers', 'tasks', 'clients'].includes(k)).length} encontrados
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-indigo-600/90 leading-relaxed font-semibold pt-1">
+                          Exportado em: {new Date(restoreFileContent.exportedAt).toLocaleDateString('pt-BR')} às {new Date(restoreFileContent.exportedAt).toLocaleTimeString('pt-BR')}
+                        </p>
+                      </div>
+
+                      <div className="space-y-3">
+                        <label className="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Selecione o Método de Restauração</label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setRestoreMode('merge')}
+                            className={`p-3 border rounded-xl flex flex-col gap-1 text-left transition-all cursor-pointer ${
+                              restoreMode === 'merge'
+                                ? 'border-purple-600 bg-purple-50/20 text-purple-900 shadow-sm'
+                                : 'border-neutral-200 hover:bg-neutral-50 text-neutral-600'
+                            }`}
+                          >
+                            <span className="text-xs font-bold block">Mesclar Registros (Merge)</span>
+                            <span className="text-[10px] opacity-80 leading-normal">
+                              Recomendado. Preserva dados que já existem no banco local/nuvem e apenas adiciona ou atualiza registros que possuem IDs conflitantes.
+                            </span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setRestoreMode('overwrite')}
+                            className={`p-3 border rounded-xl flex flex-col gap-1 text-left transition-all cursor-pointer ${
+                              restoreMode === 'overwrite'
+                                ? 'border-rose-600 bg-rose-50/10 text-rose-900 shadow-sm'
+                                : 'border-neutral-200 hover:bg-neutral-50 text-neutral-600'
+                            }`}
+                          >
+                            <span className="text-xs font-bold block text-rose-700">Substituir Banco de Dados (Overwrite)</span>
+                            <span className="text-[10px] opacity-80 leading-normal text-rose-600">
+                              Perigo! Limpa totalmente a base atual e reconstrói as coleções do zero com o arquivo. Ideal para subir o site do zero em domínios novos.
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {restoreMode === 'overwrite' && (
+                        <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl space-y-3 animate-fade-in">
+                          <p className="text-[11px] text-rose-800 leading-relaxed font-bold flex gap-1.5 items-center">
+                            <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                            <span>CONFIRMAÇÃO EXIGIDA — RISCO DE PERDA DE DADOS</span>
+                          </p>
+                          <p className="text-[10px] text-rose-700/90 leading-relaxed">
+                            Ao optar por substituir, todos os freelancers, diárias, clientes e configurações atualmente cadastrados serão apagados de forma permanente. As contas de login também serão alteradas de acordo com as contas presentes no backup.
+                          </p>
+                          <div className="space-y-1.5">
+                            <label className="block text-[10px] font-bold text-rose-700 uppercase tracking-wider">
+                              Digite <span className="underline font-black">RESTAURAR</span> para confirmar:
+                            </label>
+                            <input
+                              type="text"
+                              value={restoreConfirmText}
+                              onChange={(e) => setRestoreConfirmText(e.target.value)}
+                              placeholder="Digite RESTAURAR"
+                              className="w-full text-xs font-bold font-mono px-3 py-2 border border-rose-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-rose-500 bg-white"
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="pt-4 border-t border-neutral-100 flex items-center justify-end gap-3 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setShowRestoreModal(false)}
+                          className="px-4 py-2 border border-neutral-200 rounded-xl text-xs font-semibold hover:bg-neutral-50 cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isRestoring || (restoreMode === 'overwrite' && restoreConfirmText !== 'RESTAURAR')}
+                          onClick={handleRestoreFullBackupJSON}
+                          className={`px-5 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 cursor-pointer shadow-3xs ${
+                            restoreMode === 'overwrite'
+                              ? 'bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400'
+                              : 'bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400'
+                          }`}
+                        >
+                          {isRestoring ? (
+                            <>
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                              Sincronizando Firestore...
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              Iniciar Sincronização
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                    </div>
+                  </motion.div>
+                </div>
+              )}
+            </AnimatePresence>
+
           </div>
         )}
 
