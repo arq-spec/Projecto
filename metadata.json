@@ -1,0 +1,6 @@
+{
+  "name": "Frello",
+  "description": "Sistema de gerenciamento de freelancers, incluindo cadastro, agenda de disponibilidade, notificações de demandas e dashboard de progresso.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
