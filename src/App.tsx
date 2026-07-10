@@ -1558,18 +1558,61 @@ export default function App() {
       for (const attempt of attempts) {
         try {
           console.log(`[WhatsApp Notification] Trying strategy "${attempt.name}" to endpoint: ${attempt.endpoint}`);
-          const res = await fetch('/api/whatsapp/send', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              endpoint: attempt.endpoint,
+          
+          let res: Response;
+          const isDirect = storedConfig.requestMode === 'direct';
+
+          if (isDirect) {
+            const directHeaders: Record<string, string> = {
+              'Content-Type': 'application/json',
+              ...(attempt.headers || {})
+            };
+            const fetchOptions: RequestInit = {
               method: attempt.method || 'POST',
-              headers: attempt.headers,
-              body: attempt.body
-            })
-          });
+              headers: directHeaders,
+            };
+            if (attempt.body && attempt.method !== 'GET' && attempt.method !== 'HEAD') {
+              fetchOptions.body = typeof attempt.body === 'string' ? attempt.body : JSON.stringify(attempt.body);
+            }
+            res = await fetch(attempt.endpoint, fetchOptions);
+          } else {
+            let proxyResponse: Response;
+            try {
+              proxyResponse = await fetch('/api/whatsapp/send', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  endpoint: attempt.endpoint,
+                  method: attempt.method || 'POST',
+                  headers: attempt.headers,
+                  body: attempt.body
+                })
+              });
+            } catch (proxyNetworkErr) {
+              console.warn('[WhatsApp Notification] Proxy server connection failed, falling back to direct:', proxyNetworkErr);
+              proxyResponse = new Response('404 Not Found', { status: 404 });
+            }
+
+            if (proxyResponse.status === 404) {
+              console.log('[WhatsApp Notification] Server Proxy endpoint returned 404. Falling back to Direct client-side routing!');
+              const directHeaders: Record<string, string> = {
+                'Content-Type': 'application/json',
+                ...(attempt.headers || {})
+              };
+              const fetchOptions: RequestInit = {
+                method: attempt.method || 'POST',
+                headers: directHeaders,
+              };
+              if (attempt.body && attempt.method !== 'GET' && attempt.method !== 'HEAD') {
+                fetchOptions.body = typeof attempt.body === 'string' ? attempt.body : JSON.stringify(attempt.body);
+              }
+              res = await fetch(attempt.endpoint, fetchOptions);
+            } else {
+              res = proxyResponse;
+            }
+          }
           
           if (res.ok) {
             console.log(`[WhatsApp Notification] Successfully sent via strategy "${attempt.name}"`);

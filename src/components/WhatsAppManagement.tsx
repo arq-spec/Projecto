@@ -10,6 +10,7 @@ interface WhatsAppConfig {
   defaultPhone: string;
   enabled: boolean;
   clientToken?: string;
+  requestMode?: 'proxy' | 'direct';
   events: {
     checkIn: boolean;
     checkOut: boolean;
@@ -29,6 +30,7 @@ export default function WhatsAppManagement() {
     defaultPhone: '',
     enabled: false,
     clientToken: '',
+    requestMode: 'proxy',
     events: {
       checkIn: true,
       checkOut: true,
@@ -644,18 +646,61 @@ export default function WhatsAppManagement() {
 
       try {
         const t0 = performance.now();
-        const res = await fetch('/api/whatsapp/send', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            endpoint: attempt.endpoint,
+        let res: Response;
+        const isDirect = config.requestMode === 'direct';
+
+        if (isDirect) {
+          const directHeaders: Record<string, string> = {
+            'Content-Type': 'application/json',
+            ...(attempt.headers || {})
+          };
+          const fetchOptions: RequestInit = {
             method: attempt.method || 'POST',
-            headers: attempt.headers,
-            body: attempt.body
-          })
-        });
+            headers: directHeaders,
+          };
+          if (attempt.body && attempt.method !== 'GET' && attempt.method !== 'HEAD') {
+            fetchOptions.body = typeof attempt.body === 'string' ? attempt.body : JSON.stringify(attempt.body);
+          }
+          res = await fetch(attempt.endpoint, fetchOptions);
+        } else {
+          let proxyResponse: Response;
+          try {
+            proxyResponse = await fetch('/api/whatsapp/send', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                endpoint: attempt.endpoint,
+                method: attempt.method || 'POST',
+                headers: attempt.headers,
+                body: attempt.body
+              })
+            });
+          } catch (proxyNetworkErr) {
+            // If the express server is off/unavailable
+            console.warn('[WhatsApp] Proxy server connection failed, falling back to direct:', proxyNetworkErr);
+            proxyResponse = new Response('404 Not Found', { status: 404 });
+          }
+
+          if (proxyResponse.status === 404) {
+            setTestLog(prev => `${prev}⚠️ [Estático] Servidor Express indisponível (404). Executando requisição DIRETA do navegador...\n`);
+            const directHeaders: Record<string, string> = {
+              'Content-Type': 'application/json',
+              ...(attempt.headers || {})
+            };
+            const fetchOptions: RequestInit = {
+              method: attempt.method || 'POST',
+              headers: directHeaders,
+            };
+            if (attempt.body && attempt.method !== 'GET' && attempt.method !== 'HEAD') {
+              fetchOptions.body = typeof attempt.body === 'string' ? attempt.body : JSON.stringify(attempt.body);
+            }
+            res = await fetch(attempt.endpoint, fetchOptions);
+          } else {
+            res = proxyResponse;
+          }
+        }
         const t1 = performance.now();
         const duration = Math.round(t1 - t0);
 
@@ -1014,6 +1059,50 @@ export default function WhatsAppManagement() {
                           onChange={(e) => setConfig({ ...config, instanceId: e.target.value })}
                           className="w-full text-xs font-mono bg-white dark:bg-neutral-950 p-2.5 border border-neutral-200 dark:border-neutral-800 rounded-lg text-neutral-700 dark:text-neutral-300"
                         />
+                      </div>
+                    </div>
+
+                    {/* Modo de Envio (Proxy vs Direct) */}
+                    <div className="space-y-1.5 pt-2 border-t border-neutral-200/50 dark:border-neutral-800/50 mt-2">
+                      <label className="block text-[10px] font-bold text-neutral-500 dark:text-neutral-450 uppercase tracking-wider">
+                        Roteamento das Requisições (Modo de Envio)
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setConfig({ ...config, requestMode: 'proxy' })}
+                          className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-center ${
+                            (config.requestMode || 'proxy') === 'proxy'
+                              ? 'bg-purple-500/10 border-purple-500 text-purple-950 dark:text-purple-400 font-bold'
+                              : 'bg-white dark:bg-neutral-950 border-neutral-200 dark:border-neutral-850 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-900'
+                          }`}
+                        >
+                          <span className="text-xs flex items-center gap-1">
+                            <Settings className="w-3.5 h-3.5 shrink-0" />
+                            Proxy do Servidor (Express Backend)
+                          </span>
+                          <span className="text-[9px] font-normal opacity-85 mt-0.5 leading-normal">
+                            Seguro. Passa pelo servidor Express para ocultar tokens e contornar CORS / restrições de rede.
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setConfig({ ...config, requestMode: 'direct' })}
+                          className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer flex flex-col justify-center ${
+                            config.requestMode === 'direct'
+                              ? 'bg-emerald-500/10 border-emerald-500 text-emerald-950 dark:text-emerald-400 font-bold'
+                              : 'bg-white dark:bg-neutral-950 border-neutral-200 dark:border-neutral-850 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-900'
+                          }`}
+                        >
+                          <span className="text-xs flex items-center gap-1">
+                            <Globe className="w-3.5 h-3.5 shrink-0" />
+                            Direto do Navegador (Sem Servidor / Estático)
+                          </span>
+                          <span className="text-[9px] font-normal opacity-85 mt-0.5 leading-normal">
+                            Independente. Envia chamadas direto do navegador do usuário. Perfeito para hospedagem estática Nginx.
+                          </span>
+                        </button>
                       </div>
                     </div>
 
