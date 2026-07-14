@@ -1,4 +1,4 @@
-import { loadFromFirebase } from '../firebase';
+import { loadFromDatabase } from '../database';
 
 /**
  * Triggers a real webhook POST request to the configured destination URL.
@@ -6,8 +6,8 @@ import { loadFromFirebase } from '../firebase';
  */
 export async function triggerWebhook(event: string, data: any) {
   try {
-    // Lazy-load API configuration from Firebase so we always have the freshest configuration
-    const apiConfig = await loadFromFirebase('api_config');
+    // Lazy-load API configuration from Database so we always have the freshest configuration
+    const apiConfig = await loadFromDatabase('api_config');
     if (!apiConfig || !apiConfig.webhooksEnabled || !apiConfig.webhookUrl) {
       return;
     }

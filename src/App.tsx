@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Freelancer, Task, CalendarEvent, Notification, Client, UserProfile, ProfilePermissions, SystemUser, PdfTheme, RegistrationRequest } from './types';
 import { createInitialUsers, generateUsername, createNewUserForFreelancer, ensureMasterAdmin } from './utils/userUtils';
-import { loadFromFirebase, saveToFirebase, subscribeToFirebase } from './firebase';
+import { loadFromDatabase, saveToDatabase, subscribeToDatabase } from './database';
 import { 
   initialFreelancers, 
   initialTasks, 
@@ -18,7 +18,7 @@ import NotificationCenter from './components/NotificationCenter';
 import Administration from './components/Administration';
 import LoginDashboard from './components/LoginDashboard';
 import Workstation from './components/Workstation';
-import { Documentation } from './components/Documentation';
+import ChangePasswordModal from './components/ChangePasswordModal';
 
 
 import { 
@@ -40,7 +40,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   AlertCircle,
-  ClipboardList,
   Menu,
   X
 } from 'lucide-react';
@@ -205,7 +204,7 @@ export default function App() {
   }, [theme]);
 
   // Tab control state
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'freelancers' | 'calendar' | 'notifications' | 'administration' | 'workstation' | 'documentation'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'freelancers' | 'calendar' | 'notifications' | 'administration' | 'workstation'>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [highlightKanbanCardId, setHighlightKanbanCardId] = useState<string | null>(null);
   const [navigatedProjectId, setNavigatedProjectId] = useState<string | null>(null);
@@ -216,6 +215,8 @@ export default function App() {
     title: string;
     message: string;
   } | null>(null);
+  
+  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
 
   // Retraction side-panel automatic control states
   const [retractEnabled, setRetractEnabled] = useState<boolean>(() => {
@@ -451,11 +452,11 @@ export default function App() {
     }
   }, [users, currentUser, dbLoaded]);
 
-  // Asynchronously load all data from Firebase Firestore on Mount
+  // Asynchronously load all data from Database Database on Mount
   useEffect(() => {
     async function loadAllData() {
       try {
-        console.log('[Firebase] Loading all states from Firestore...');
+        console.log('[Database] Loading all states from Database...');
         const [
           dbFreelancers,
           dbTasks,
@@ -466,14 +467,14 @@ export default function App() {
           dbPermissions,
           dbRegistrationRequests
         ] = await Promise.all([
-          loadFromFirebase('freelancers').catch(err => { console.warn('[Firebase] error load freelancers', err); return null; }),
-          loadFromFirebase('tasks').catch(err => { console.warn('[Firebase] error load tasks', err); return null; }),
-          loadFromFirebase('calendarEvents').catch(err => { console.warn('[Firebase] error load calendarEvents', err); return null; }),
-          loadFromFirebase('notifications').catch(err => { console.warn('[Firebase] error load notifications', err); return null; }),
-          loadFromFirebase('clients').catch(err => { console.warn('[Firebase] error load clients', err); return null; }),
-          loadFromFirebase('users').catch(err => { console.warn('[Firebase] error load users', err); return null; }),
-          loadFromFirebase('permissions').catch(err => { console.warn('[Firebase] error load permissions', err); return null; }),
-          loadFromFirebase('registrationRequests').catch(err => { console.warn('[Firebase] error load reg requests', err); return null; })
+          loadFromDatabase('freelancers').catch(err => { console.warn('[Database] error load freelancers', err); return null; }),
+          loadFromDatabase('tasks').catch(err => { console.warn('[Database] error load tasks', err); return null; }),
+          loadFromDatabase('calendarEvents').catch(err => { console.warn('[Database] error load calendarEvents', err); return null; }),
+          loadFromDatabase('notifications').catch(err => { console.warn('[Database] error load notifications', err); return null; }),
+          loadFromDatabase('clients').catch(err => { console.warn('[Database] error load clients', err); return null; }),
+          loadFromDatabase('users').catch(err => { console.warn('[Database] error load users', err); return null; }),
+          loadFromDatabase('permissions').catch(err => { console.warn('[Database] error load permissions', err); return null; }),
+          loadFromDatabase('registrationRequests').catch(err => { console.warn('[Database] error load reg requests', err); return null; })
         ]);
 
         if (dbFreelancers !== null) {
@@ -482,12 +483,12 @@ export default function App() {
           try { if (savedFree) localFreels = JSON.parse(savedFree); } catch (e) {}
           
           if (localFreels && Array.isArray(localFreels) && Array.isArray(dbFreelancers) && localFreels.length > dbFreelancers.length) {
-            console.warn("[Firebase] Local storage has MORE freelancers than Firebase. Retaining local storage to recover from previous 1MB limit crash.");
+            console.warn("[Database] Local storage has MORE freelancers than Database. Retaining local storage to recover from previous 1MB limit crash.");
             setFreelancers(localFreels);
             lastDbValueRef.current.freelancers = localFreels;
             // Attempt to re-sync
             setTimeout(() => {
-              saveToFirebase('freelancers', localFreels);
+              saveToDatabase('freelancers', localFreels);
             }, 1500);
           } else {
             setFreelancers(dbFreelancers);
@@ -502,11 +503,11 @@ export default function App() {
           try { if (savedTasks) localTasks = JSON.parse(savedTasks); } catch (e) {}
           
           if (localTasks && Array.isArray(localTasks) && Array.isArray(dbTasks) && localTasks.length > dbTasks.length) {
-            console.warn("[Firebase] Local storage has MORE tasks than Firebase. Retaining local storage.");
+            console.warn("[Database] Local storage has MORE tasks than Database. Retaining local storage.");
             setTasks(localTasks);
             lastDbValueRef.current.tasks = localTasks;
             setTimeout(() => {
-              saveToFirebase('tasks', localTasks);
+              saveToDatabase('tasks', localTasks);
             }, 1500); 
           } else {
             setTasks(dbTasks);
@@ -550,7 +551,7 @@ export default function App() {
           setSafeUsers(fullyEnsured);
           lastDbValueRef.current.users = validUsers;
         } else {
-          // If Firebase is null (e.g. Quota limit or fresh db), do NOT wipe local storage.
+          // If Database is null (e.g. Quota limit or fresh db), do NOT wipe local storage.
           // Try to recover from any previous local storage keys if current is wiped out.
           let recoveredUsers = null;
           const possibleKeys = [
@@ -582,7 +583,7 @@ export default function App() {
              setSafeUsers(fullyEnsured);
              lastDbValueRef.current.users = fullyEnsured;
              setTimeout(() => {
-                saveToFirebase('users', fullyEnsured);
+                saveToDatabase('users', fullyEnsured);
              }, 3000);
           } else {
             const loadedFreelancers = dbFreelancers !== null ? dbFreelancers : freelancers;
@@ -605,9 +606,9 @@ export default function App() {
         }
         isLoadedRef.current.registrationRequests = true;
 
-        console.log('[Firebase] All cloud database states synchronization finalized.');
+        console.log('[Database] All cloud database states synchronization finalized.');
       } catch (err) {
-        console.warn('[Firebase] General error in Promise.all synchronizing Firestore database', err);
+        console.warn('[Database] General error in Promise.all synchronizing Database database', err);
       } finally {
         // Always set dbLoaded to true so that user is never blocked by a loading screen, and we continue gracefully
         setDbLoaded(true);
@@ -616,13 +617,13 @@ export default function App() {
     loadAllData();
   }, []);
 
-  // Setup real-time updates from Firebase after initial database load
+  // Setup real-time updates from Database after initial database load
   useEffect(() => {
     if (!dbLoaded) return;
 
-    console.log('[Firebase] Setting up real-time subscription listeners...');
+    console.log('[Database] Setting up real-time subscription listeners...');
 
-    const unsubFreelancers = subscribeToFirebase('freelancers', (data) => {
+    const unsubFreelancers = subscribeToDatabase('freelancers', (data) => {
       if (data) {
         setFreelancers(prev => {
           lastDbValueRef.current.freelancers = data;
@@ -631,7 +632,7 @@ export default function App() {
       }
     });
 
-    const unsubTasks = subscribeToFirebase('tasks', (data) => {
+    const unsubTasks = subscribeToDatabase('tasks', (data) => {
       if (data) {
         setTasks(prev => {
           lastDbValueRef.current.tasks = data;
@@ -640,7 +641,7 @@ export default function App() {
       }
     });
 
-    const unsubCalendar = subscribeToFirebase('calendarEvents', (data) => {
+    const unsubCalendar = subscribeToDatabase('calendarEvents', (data) => {
       if (data) {
         setCalendarEvents(prev => {
           lastDbValueRef.current.calendarEvents = data;
@@ -649,7 +650,7 @@ export default function App() {
       }
     });
 
-    const unsubNotifications = subscribeToFirebase('notifications', (data) => {
+    const unsubNotifications = subscribeToDatabase('notifications', (data) => {
       if (data) {
         setNotifications(prev => {
           const cleanData = deduplicateNotifications(data);
@@ -659,7 +660,7 @@ export default function App() {
       }
     });
 
-    const unsubClients = subscribeToFirebase('clients', (data) => {
+    const unsubClients = subscribeToDatabase('clients', (data) => {
       if (data) {
         setClients(prev => {
           lastDbValueRef.current.clients = data;
@@ -668,7 +669,7 @@ export default function App() {
       }
     });
 
-    const unsubUsers = subscribeToFirebase('users', (data) => {
+    const unsubUsers = subscribeToDatabase('users', (data) => {
       if (data) {
         setSafeUsers(prev => {
           const fullyEnsured = ensureMasterAdmin(data);
@@ -678,7 +679,7 @@ export default function App() {
       }
     });
 
-    const unsubPermissions = subscribeToFirebase('permissions', (data) => {
+    const unsubPermissions = subscribeToDatabase('permissions', (data) => {
       if (data) {
         lastDbValueRef.current.permissions = data;
         setPermissions(prev => JSON.stringify(prev) !== JSON.stringify(data) ? data : prev);
@@ -686,7 +687,7 @@ export default function App() {
     });
 
     return () => {
-      console.log('[Firebase] Cleaning up real-time subscriptions...');
+      console.log('[Database] Cleaning up real-time subscriptions...');
       unsubFreelancers();
       unsubTasks();
       unsubCalendar();
@@ -699,13 +700,13 @@ export default function App() {
 
   const [activeAdminModule, setActiveAdminModule] = useState<'arquivados' | 'clientes' | 'permissoes' | 'usuarios' | 'customizacao' | 'logistica' | 'api' | 'dados' | 'pdf' | 'aprovacoes' | 'whatsapp'>('usuarios');
 
-  // Save changes to localStorage and Firebase whenever state gets updated
+  // Save changes to localStorage and Database whenever state gets updated
   useEffect(() => {
     if (!dbLoaded || !isLoadedRef.current.freelancers) return;
     localStorage.setItem('freelance_management_freelancers_v2', JSON.stringify(freelancers));
     if (JSON.stringify(freelancers) !== JSON.stringify(lastDbValueRef.current.freelancers)) {
       lastDbValueRef.current.freelancers = freelancers;
-      saveToFirebase('freelancers', freelancers);
+      saveToDatabase('freelancers', freelancers);
     }
   }, [freelancers, dbLoaded]);
 
@@ -714,7 +715,7 @@ export default function App() {
     localStorage.setItem('freelance_management_tasks_v2', JSON.stringify(tasks));
     if (JSON.stringify(tasks) !== JSON.stringify(lastDbValueRef.current.tasks)) {
       lastDbValueRef.current.tasks = tasks;
-      saveToFirebase('tasks', tasks);
+      saveToDatabase('tasks', tasks);
     }
   }, [tasks, dbLoaded]);
 
@@ -723,7 +724,7 @@ export default function App() {
     localStorage.setItem('freelance_management_calendar_v2', JSON.stringify(calendarEvents));
     if (JSON.stringify(calendarEvents) !== JSON.stringify(lastDbValueRef.current.calendarEvents)) {
       lastDbValueRef.current.calendarEvents = calendarEvents;
-      saveToFirebase('calendarEvents', calendarEvents);
+      saveToDatabase('calendarEvents', calendarEvents);
     }
   }, [calendarEvents, dbLoaded]);
 
@@ -732,7 +733,7 @@ export default function App() {
     localStorage.setItem('freelance_management_notifications_v2', JSON.stringify(notifications));
     if (JSON.stringify(notifications) !== JSON.stringify(lastDbValueRef.current.notifications)) {
       lastDbValueRef.current.notifications = notifications;
-      saveToFirebase('notifications', notifications);
+      saveToDatabase('notifications', notifications);
     }
   }, [notifications, dbLoaded]);
 
@@ -741,7 +742,7 @@ export default function App() {
     localStorage.setItem('freelance_management_clients_v2', JSON.stringify(clients));
     if (JSON.stringify(clients) !== JSON.stringify(lastDbValueRef.current.clients)) {
       lastDbValueRef.current.clients = clients;
-      saveToFirebase('clients', clients);
+      saveToDatabase('clients', clients);
     }
   }, [clients, dbLoaded]);
 
@@ -750,7 +751,7 @@ export default function App() {
     localStorage.setItem('freelance_management_users_v3', JSON.stringify(users));
     if (JSON.stringify(users) !== JSON.stringify(lastDbValueRef.current.users)) {
       lastDbValueRef.current.users = users;
-      saveToFirebase('users', users);
+      saveToDatabase('users', users);
     }
   }, [users, dbLoaded]);
 
@@ -759,7 +760,7 @@ export default function App() {
     localStorage.setItem('freelance_management_permissions_v2', JSON.stringify(permissions));
     if (JSON.stringify(permissions) !== JSON.stringify(lastDbValueRef.current.permissions)) {
       lastDbValueRef.current.permissions = permissions;
-      saveToFirebase('permissions', permissions);
+      saveToDatabase('permissions', permissions);
     }
   }, [permissions, dbLoaded]);
 
@@ -768,7 +769,7 @@ export default function App() {
     localStorage.setItem('freelance_management_reg_reqs', JSON.stringify(registrationRequests));
     if (JSON.stringify(registrationRequests) !== JSON.stringify(lastDbValueRef.current.registrationRequests)) {
       lastDbValueRef.current.registrationRequests = registrationRequests;
-      saveToFirebase('registrationRequests', registrationRequests);
+      saveToDatabase('registrationRequests', registrationRequests);
     }
   }, [registrationRequests, dbLoaded]);
 
@@ -863,6 +864,19 @@ export default function App() {
   // Shared status modifiers
   const handleUpdateTask = (updatedTask: Task) => {
     setTasks(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
+
+    // Remove confirmation notifications for any allocations that are no longer pending
+    if (updatedTask.alocacoes && updatedTask.alocacoes.length > 0) {
+      const nonPendingAllocations = updatedTask.alocacoes.filter(a => a.statusConfirmacao !== 'Pendente');
+      if (nonPendingAllocations.length > 0) {
+        setNotifications(prevNotifs => {
+          const nonPendingIds = new Set(nonPendingAllocations.map(a => a.id));
+          return prevNotifs.filter(n => 
+            !(n.isConfirmacaoRequest && n.projetoId === updatedTask.id && n.alocacaoId && nonPendingIds.has(n.alocacaoId))
+          );
+        });
+      }
+    }
   };
 
   // Process direct actions from deep links (e.g. WhatsApp confirmation/decline buttons)
@@ -1066,7 +1080,7 @@ export default function App() {
 
   const triggerWhatsAppNotification = async (newNotif: Notification) => {
     try {
-      const storedConfig = await loadFromFirebase('whatsapp_api_config');
+      const storedConfig = await loadFromDatabase('whatsapp_api_config');
       if (!storedConfig || !storedConfig.enabled) {
         console.log('[WhatsApp Notification] Integration is disabled or not configured.');
         return;
@@ -1949,18 +1963,6 @@ export default function App() {
             {currentUser?.perfil !== 'Freelancer' && (
               <button
                 type="button"
-                onClick={() => { setActiveTab('documentation'); setIsMobileMenuOpen(false); }}
-                className={getTabButtonClass('documentation')}
-                title="Documentação"
-              >
-                <ClipboardList className="w-4.5 h-4.5 shrink-0" />
-                <span className="truncate">Documentação</span>
-              </button>
-            )}
-
-            {currentUser?.perfil !== 'Freelancer' && (
-              <button
-                type="button"
                 onClick={() => {
                   setActiveTab('administration');
                   setActiveAdminModule('logistica');
@@ -2022,7 +2024,15 @@ export default function App() {
               </div>
             </div>
             
-            <div className={`transition-all duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] overflow-hidden flex items-center shrink-0 ${sidebarEffectiveCollapsed ? 'w-0 opacity-0' : 'w-8 opacity-100'}`}>
+            <div className={`transition-all duration-500 ease-[cubic-bezier(0.2,0.8,0.2,1)] overflow-hidden flex items-center shrink-0 ${sidebarEffectiveCollapsed ? 'w-0 opacity-0' : 'w-16 opacity-100 gap-1'}`}>
+              <button
+                type="button"
+                onClick={() => setIsChangePasswordModalOpen(true)}
+                className="text-neutral-400 hover:text-purple-400 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-neutral-800 transition-all duration-300 ease-out cursor-pointer shrink-0"
+                title="Alterar Senha"
+              >
+                <Settings className="w-4.5 h-4.5 shrink-0" />
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -2329,10 +2339,6 @@ export default function App() {
               onClearHighlight={() => setHighlightKanbanCardId(null)}
             />
           )}
-
-          {activeTab === 'documentation' && (
-            <Documentation />
-          )}
         </div>
       </main>
 
@@ -2367,6 +2373,16 @@ export default function App() {
         </div>
       )}
 
+      {/* Change Password Modal */}
+      {currentUser && (
+        <ChangePasswordModal
+          isOpen={isChangePasswordModalOpen}
+          onClose={() => setIsChangePasswordModalOpen(false)}
+          currentUser={currentUser}
+          users={users}
+          onUpdateUsers={setSafeUsers}
+        />
+      )}
     </div>
   );
 }

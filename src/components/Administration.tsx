@@ -6,7 +6,7 @@ import LogisticsInventory from './LogisticsInventory';
 import ApiWebhooksManagement from './ApiWebhooksManagement';
 import WhatsAppManagement from './WhatsAppManagement';
 import { generateUsername, ensureMasterAdmin } from '../utils/userUtils';
-import { saveToFirebase, loadFromFirebase } from '../firebase';
+import { saveToDatabase, loadFromDatabase } from '../database';
 import { 
   Shield, 
   UserX, 
@@ -186,7 +186,7 @@ export default function Administration({
           backupData[col.key] = col.source;
         } else {
           try {
-            const dbVal = await loadFromFirebase(col.key);
+            const dbVal = await loadFromDatabase(col.key);
             if (dbVal !== null) {
               backupData[col.key] = dbVal;
             } else {
@@ -204,7 +204,7 @@ export default function Administration({
         app: "Frello Management Platform",
         version: "2.5",
         exportedAt: new Date().toISOString(),
-        databaseType: "Cloud Firestore",
+        databaseType: "Cloud Database",
         collections: backupData
       };
 
@@ -252,7 +252,7 @@ export default function Administration({
           if (key === 'users') {
             finalData = ensureMasterAdmin(importedData);
           }
-          await saveToFirebase(key, finalData);
+          await saveToDatabase(key, finalData);
           localStorage.setItem(getLocalStorageKey(key), JSON.stringify(finalData));
           updateStateInApp(key, finalData);
         } else {
@@ -265,7 +265,7 @@ export default function Administration({
           else if (key === 'registrationRequests') currentData = registrationRequests;
           else if (key === 'permissions') currentData = permissions;
           else {
-            currentData = await loadFromFirebase(key);
+            currentData = await loadFromDatabase(key);
             if (!currentData) {
               const localSaved = localStorage.getItem(getLocalStorageKey(key));
               currentData = localSaved ? JSON.parse(localSaved) : [];
@@ -292,7 +292,7 @@ export default function Administration({
             finalData = ensureMasterAdmin(finalData);
           }
 
-          await saveToFirebase(key, finalData);
+          await saveToDatabase(key, finalData);
           localStorage.setItem(getLocalStorageKey(key), JSON.stringify(finalData));
           updateStateInApp(key, finalData);
         }
@@ -418,7 +418,7 @@ export default function Administration({
       };
       const updatedList = [...users, newUser];
       onUpdateUsers(updatedList);
-      saveToFirebase('users', updatedList);
+      saveToDatabase('users', updatedList);
       setShowAddUserModal(false);
     } else {
       // Edit existing user - permit editing name and linked freelancer
@@ -433,7 +433,7 @@ export default function Administration({
         return u;
       });
       onUpdateUsers(updatedUsers);
-      saveToFirebase('users', updatedUsers);
+      saveToDatabase('users', updatedUsers);
       setShowEditUserModal(false);
       setEditingUser(null);
     }
@@ -455,7 +455,7 @@ export default function Administration({
     if (confirm(`Deseja revogar a senha atual do usuário "${user.nome}"? Na próxima vez que ele logar, necessitará escolher uma nova senha.`)) {
       const updatedList = users.map(u => u.id === userId ? { ...u, password: '' } : u);
       onUpdateUsers(updatedList);
-      saveToFirebase('users', updatedList);
+      saveToDatabase('users', updatedList);
       alert('A senha do usuário foi limpada com sucesso. Agora ele precisará redefinir sua senha no primeiro login.');
     }
   };
@@ -2107,7 +2107,7 @@ export default function Administration({
                           {isRestoring ? (
                             <>
                               <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                              Sincronizando Firestore...
+                              Sincronizando Database...
                             </>
                           ) : (
                             <>

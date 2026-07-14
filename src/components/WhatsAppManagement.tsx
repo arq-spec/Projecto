@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MessageSquare, Key, Globe, Eye, EyeOff, RefreshCw, Send, CheckCircle2, AlertCircle, Info, Settings, HeartHandshake, HelpCircle, QrCode, Wifi, WifiOff, Smartphone, Camera, ExternalLink, ShieldCheck, BookOpen, Sparkles, Copy, Trash2 } from 'lucide-react';
-import { loadFromFirebase, saveToFirebase } from '../firebase';
+import { loadFromDatabase, saveToDatabase } from '../database';
 
 interface WhatsAppConfig {
   provider: 'meta' | 'evolution' | 'zapi' | 'custom' | 'callmebot';
@@ -73,7 +73,7 @@ export default function WhatsAppManagement() {
     async function loadConfig() {
       setIsLoading(true);
       try {
-        const stored = await loadFromFirebase('whatsapp_api_config');
+        const stored = await loadFromDatabase('whatsapp_api_config');
         if (stored) {
           setConfig(prev => ({
             ...prev,
@@ -89,7 +89,7 @@ export default function WhatsAppManagement() {
         }
 
         // Load connection status
-        const savedStatus = await loadFromFirebase('whatsapp_connection_state');
+        const savedStatus = await loadFromDatabase('whatsapp_connection_state');
         if (savedStatus) {
           if (savedStatus.status === 'connected') {
             setConnectionStatus('connected');
@@ -133,7 +133,7 @@ export default function WhatsAppManagement() {
     setIsSaving(true);
     setSaveStatus('idle');
     try {
-      await saveToFirebase('whatsapp_api_config', config);
+      await saveToDatabase('whatsapp_api_config', config);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (err) {
@@ -199,7 +199,7 @@ export default function WhatsAppManagement() {
 
       // Persist status
       try {
-        await saveToFirebase('whatsapp_connection_state', {
+        await saveToDatabase('whatsapp_connection_state', {
           status: 'connected',
           device: dev,
           date: dev.date
@@ -220,7 +220,7 @@ export default function WhatsAppManagement() {
       setPairingCodeStatus('idle');
       
       try {
-        await saveToFirebase('whatsapp_connection_state', {
+        await saveToDatabase('whatsapp_connection_state', {
           status: 'disconnected',
           device: null,
           date: null
@@ -289,7 +289,7 @@ export default function WhatsAppManagement() {
 
       // Persist status
       try {
-        await saveToFirebase('whatsapp_connection_state', {
+        await saveToDatabase('whatsapp_connection_state', {
           status: 'connected',
           device: dev,
           date: dev.date
@@ -731,9 +731,9 @@ export default function WhatsAppManagement() {
             // Atualiza o estado
             setConfig(prev => {
               const updated = { ...prev, apiUrl: attempt.endpoint };
-              // Salva as configurações corrigidas no Firebase para as próximas notificações funcionarem 100%!
-              saveToFirebase('whatsapp_api_config', updated).catch(err => {
-                console.error('Erro ao salvar autocorreção no Firebase:', err);
+              // Salva as configurações corrigidas no Database para as próximas notificações funcionarem 100%!
+              saveToDatabase('whatsapp_api_config', updated).catch(err => {
+                console.error('Erro ao salvar autocorreção no Database:', err);
               });
               return updated;
             });

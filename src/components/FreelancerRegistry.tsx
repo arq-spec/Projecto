@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Freelancer, PerformanceReview, ProjectHistory, Task, UserProfile, RegistrationRequest } from '../types';
-import { loadFromFirebase, saveToFirebase } from '../firebase';
+import { loadFromDatabase, saveToDatabase } from '../database';
 import { 
   Search, 
   Plus, 
@@ -169,13 +169,13 @@ export default function FreelancerRegistry({
     ];
   });
 
-  // Sync initial state from Firebase on mount
+  // Sync initial state from Database on mount
   React.useEffect(() => {
     async function loadRolesAndCerts() {
       try {
         const [dbRoles, dbCerts] = await Promise.all([
-          loadFromFirebase('roles').catch(err => { console.warn('[Firebase] failed load roles', err); return null; }),
-          loadFromFirebase('certifications').catch(err => { console.warn('[Firebase] failed load certifications', err); return null; })
+          loadFromDatabase('roles').catch(err => { console.warn('[Database] failed load roles', err); return null; }),
+          loadFromDatabase('certifications').catch(err => { console.warn('[Database] failed load certifications', err); return null; })
         ]);
         if (dbRoles !== null) {
           setRoles(dbRoles);
@@ -189,7 +189,7 @@ export default function FreelancerRegistry({
         }
         isLoadedRef.current.certifications = true;
       } catch (err) {
-        console.warn("Failed to load roles/certs from Firebase", err);
+        console.warn("Failed to load roles/certs from Database", err);
       } finally {
         setDbLoaded(true);
       }
@@ -203,7 +203,7 @@ export default function FreelancerRegistry({
     localStorage.setItem('freelance_management_roles', JSON.stringify(roles));
     if (JSON.stringify(roles) !== JSON.stringify(lastDbValueRef.current.roles)) {
       lastDbValueRef.current.roles = roles;
-      saveToFirebase('roles', roles);
+      saveToDatabase('roles', roles);
     }
   }, [roles, dbLoaded]);
 
@@ -218,7 +218,7 @@ export default function FreelancerRegistry({
     localStorage.setItem('freelance_management_certifications', JSON.stringify(certificationsDb));
     if (JSON.stringify(certificationsDb) !== JSON.stringify(lastDbValueRef.current.certifications)) {
       lastDbValueRef.current.certifications = certificationsDb;
-      saveToFirebase('certifications', certificationsDb);
+      saveToDatabase('certifications', certificationsDb);
     }
   }, [certificationsDb, dbLoaded]);
 
@@ -617,6 +617,18 @@ export default function FreelancerRegistry({
     setShowAddReviewForm(false);
   };
 
+  const handleDeleteReview = (reviewId: string) => {
+    if (!selectedFreelancer) return;
+    if (window.confirm('Tem certeza de que deseja apagar este comentário de desempenho?')) {
+      const updatedFreelancer: Freelancer = {
+        ...selectedFreelancer,
+        avaliacoes: selectedFreelancer.avaliacoes.filter(rev => rev.id !== reviewId)
+      };
+      onUpdateFreelancer(updatedFreelancer);
+      setSelectedFreelancer(updatedFreelancer);
+    }
+  };
+
   const handleUpdateAvailability = (status: Freelancer['disponibilidade']) => {
     if (!selectedFreelancer) return;
     const updated = {
@@ -678,7 +690,7 @@ export default function FreelancerRegistry({
     if (!selectedFreelancer || !e.target.files || e.target.files.length === 0) return;
     const file = e.target.files[0];
     
-    // Check file size limit strictly for Firestore
+    // Check file size limit strictly for Database
     if (file.size > 300 * 1024) {
       alert('Limite de 300KB excedido. Documentos muito grandes impedem o salvamento do cadastro na nuvem. Por favor comprima ou envie um arquivo menor.');
       return;
@@ -1664,12 +1676,24 @@ export default function FreelancerRegistry({
                             </div>
                             
                             {/* Stars badge */}
-                            <div className="flex gap-0.5">
-                              {Array.from({ length: 5 }).map((_, i) => (
-                                <Star key={i} className={`w-3.5 h-3.5 ${
-                                  i < rev.nota ? 'fill-amber-400 text-purple-500' : 'text-neutral-200'
-                                }`} />
-                              ))}
+                            <div className="flex flex-col items-end gap-2">
+                              <div className="flex gap-0.5">
+                                {Array.from({ length: 5 }).map((_, i) => (
+                                  <Star key={i} className={`w-3.5 h-3.5 ${
+                                    i < rev.nota ? 'fill-amber-400 text-purple-500' : 'text-neutral-200'
+                                  }`} />
+                                ))}
+                              </div>
+                              {currentUser?.perfil === 'Administrador' && !readOnly && (
+                                <button
+                                  onClick={() => handleDeleteReview(rev.id)}
+                                  className="text-neutral-400 hover:text-red-500 transition-colors p-1 rounded hover:bg-red-50 flex items-center gap-1 text-[10px] font-medium"
+                                  title="Excluir Avaliação"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  Excluir
+                                </button>
+                              )}
                             </div>
                           </div>
 

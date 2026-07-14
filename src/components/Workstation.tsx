@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { loadFromFirebase, saveToFirebase } from '../firebase';
+import { loadFromDatabase, saveToDatabase } from '../database';
 import { 
   Plus, 
   Trash2, 
@@ -35,15 +35,6 @@ import {
   BookOpen
 } from 'lucide-react';
 import Markdown from 'react-markdown';
-import {
-  connectGoogleDrive,
-  uploadFileToGoogleDrive,
-  getCachedGoogleDriveToken,
-  getCachedGoogleDriveUser,
-  clearGoogleDriveSession,
-  GoogleDriveUser,
-  UploadProgress
-} from '../utils/googleDrive';
 import { 
   Freelancer, 
   UserProfile, 
@@ -290,9 +281,9 @@ export default function Workstation({ freelancers, currentUser, onAddNotificatio
     async function loadWorkstationData() {
       try {
         const [dbWS, dbCols, dbCards] = await Promise.all([
-          loadFromFirebase('workstation_workspaces').catch(err => { console.warn('[Firebase] failed workstation workspaces load', err); return null; }),
-          loadFromFirebase('workstation_columns').catch(err => { console.warn('[Firebase] failed workstation columns load', err); return null; }),
-          loadFromFirebase('workstation_cards').catch(err => { console.warn('[Firebase] failed workstation cards load', err); return null; })
+          loadFromDatabase('workstation_workspaces').catch(err => { console.warn('[Database] failed workstation workspaces load', err); return null; }),
+          loadFromDatabase('workstation_columns').catch(err => { console.warn('[Database] failed workstation columns load', err); return null; }),
+          loadFromDatabase('workstation_cards').catch(err => { console.warn('[Database] failed workstation cards load', err); return null; })
         ]);
 
         if (dbWS !== null && dbCols !== null && dbCards !== null) {
@@ -309,7 +300,7 @@ export default function Workstation({ freelancers, currentUser, onAddNotificatio
           return;
         }
       } catch (err) {
-        console.warn("Failed to load workstation data from Firebase", err);
+        console.warn("Failed to load workstation data from Database", err);
       }
 
       // Fallback
@@ -511,9 +502,9 @@ export default function Workstation({ freelancers, currentUser, onAddNotificatio
     localStorage.setItem('frello_workstation_columns', JSON.stringify(updatedCols));
     localStorage.setItem('frello_workstation_cards', JSON.stringify(updatedCards));
     if (dbLoaded && isLoadedRef.current.workspaces && isLoadedRef.current.columns && isLoadedRef.current.cards) {
-      saveToFirebase('workstation_workspaces', updatedWS).catch(e => console.warn('WStation sync write workspaces failed', e));
-      saveToFirebase('workstation_columns', updatedCols).catch(e => console.warn('WStation sync write columns failed', e));
-      saveToFirebase('workstation_cards', updatedCards).catch(e => console.warn('WStation sync write cards failed', e));
+      saveToDatabase('workstation_workspaces', updatedWS).catch(e => console.warn('WStation sync write workspaces failed', e));
+      saveToDatabase('workstation_columns', updatedCols).catch(e => console.warn('WStation sync write columns failed', e));
+      saveToDatabase('workstation_cards', updatedCards).catch(e => console.warn('WStation sync write cards failed', e));
     }
   };
 

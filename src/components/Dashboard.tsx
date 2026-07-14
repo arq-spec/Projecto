@@ -1656,7 +1656,7 @@ function ProjectWorkView({
     };
 
     const processFile = (file: File) => {
-      // Limit attachment size for PDF/invoices strictly to Firestore limits
+      // Limit attachment size for PDF/invoices strictly to Database limits
       if (file.size > 300 * 1024) {
         alert('Limite de 300KB excedido. Documentos muito grandes não podem ser salvos no banco de dados. Comprima sua Nota Fiscal (PDF) e tente novamente.');
         return;

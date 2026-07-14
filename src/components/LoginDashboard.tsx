@@ -18,7 +18,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { saveToFirebase } from '../firebase';
+import { saveToDatabase } from '../database';
 
 interface LoginDashboardProps {
   freelancers: Freelancer[];
@@ -178,7 +178,7 @@ export default function LoginDashboard({ freelancers, users, onUpdateUsers, onAd
     });
 
     onUpdateUsers(updatedUsers);
-    saveToFirebase('users', updatedUsers);
+    saveToDatabase('users', updatedUsers);
 
     // Continue with login
     onLogin({

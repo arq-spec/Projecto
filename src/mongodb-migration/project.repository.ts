@@ -24,7 +24,7 @@ export class ProjectRepository {
 
   /**
    * Saves or updates a list of projects in bulk (replacing or merging).
-   * This mimics the frontend's saveToFirebase style, ensuring backwards-compatibility
+   * This mimics the frontend's saveToDatabase style, ensuring backwards-compatibility
    * during transition phases, but provides individual upserts for optimal MongoDB operation.
    */
   async saveAllProjects(projects: IDocProject[]): Promise<void> {

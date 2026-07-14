@@ -51,9 +51,9 @@ export default function FreelancerCalendarView({
   const isFreelancer = currentUser?.perfil === 'Freelancer';
   const [selectedFreelancerId, setSelectedFreelancerId] = useState(isFreelancer ? (currentUser?.freelancerId || freelancers[0]?.id || '') : 'all');
   
-  // Year/Month states - Defaulting to June 2026 based on Current Time Metadata!
-  const [currentYear, setCurrentYear] = useState(2026);
-  const [currentMonth, setCurrentMonth] = useState(5); // 0-indexed, so 5 = June
+  // Year/Month states - Defaulting to Current Date
+  const [currentYear, setCurrentYear] = useState(() => new Date().getFullYear());
+  const [currentMonth, setCurrentMonth] = useState(() => new Date().getMonth());
 
   // Day dialog trigger
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);

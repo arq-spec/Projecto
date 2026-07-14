@@ -33,7 +33,7 @@ export interface IDocAmbiente {
 }
 
 export interface IDocProject extends Document {
-  id: string; // Map to Firebase-compatible UUID or sequential ID
+  id: string; // Map to Database-compatible UUID or sequential ID
   evento: string;
   dataEvento: string;
   pesoMaxPonto: number;

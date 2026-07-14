@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Key, Globe, Eye, EyeOff, RefreshCw, Copy, Check, Send, Sparkles, Code, Terminal, FileCode, CheckCircle2, AlertCircle } from 'lucide-react';
-import { loadFromFirebase, saveToFirebase } from '../firebase';
+import { loadFromDatabase, saveToDatabase } from '../database';
 import { Freelancer, Task, Client, SystemUser } from '../types';
 
 interface ApiWebhooksManagementProps {
@@ -73,7 +73,7 @@ export default function ApiWebhooksManagement({
     async function loadConfig() {
       setIsLoading(true);
       try {
-        const stored = await loadFromFirebase('api_config');
+        const stored = await loadFromDatabase('api_config');
         if (stored) {
           setConfig(prev => ({
             ...prev,
@@ -111,7 +111,7 @@ export default function ApiWebhooksManagement({
           setPlaygroundHeaderKey(defaultKey);
           setPlaygroundUser(defaultUser);
           setPlaygroundPass(defaultPass);
-          await saveToFirebase('api_config', newConfig);
+          await saveToDatabase('api_config', newConfig);
         }
       } catch (err) {
         console.warn('Failed to load api_config:', err);
@@ -137,7 +137,7 @@ export default function ApiWebhooksManagement({
       const updatedConfig = { ...config, apiKey: newKey };
       setConfig(updatedConfig);
       setPlaygroundHeaderKey(newKey);
-      await saveToFirebase('api_config', updatedConfig);
+      await saveToDatabase('api_config', updatedConfig);
       alert('Nova chave de segurança gerada e salva com sucesso!');
     }
   };
@@ -147,7 +147,7 @@ export default function ApiWebhooksManagement({
     setIsSaving(true);
     setSaveStatus('idle');
     try {
-      await saveToFirebase('api_config', config);
+      await saveToDatabase('api_config', config);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (err) {

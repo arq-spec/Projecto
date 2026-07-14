@@ -1,6 +1,6 @@
-# Guia de Migração Completa: Firebase para MongoDB + JWT (Frello)
+# Guia de Migração Completa: Database para MongoDB + JWT (Frello)
 
-Este guia foi elaborado para executar a transição cirúrgica do banco de dados e autenticação do **Firebase (Firestore + Firebase Auth)** para o **MongoDB (Mongoose) + JWT (jsonwebtoken + bcrypt)**.
+Este guia foi elaborado para executar a transição cirúrgica do banco de dados e autenticação do **Database (Database + Database Auth)** para o **MongoDB (Mongoose) + JWT (jsonwebtoken + bcrypt)**.
 
 Para sua segurança e comodidade, todos os arquivos de blueprint do novo backend foram criados na pasta `/src/mongodb-migration/`. O seu aplicativo atual permanece 100% funcional até que você opte por ativar a nova rota.
 
@@ -10,9 +10,9 @@ Para sua segurança e comodidade, todos os arquivos de blueprint do novo backend
 
 Abra o terminal na pasta raiz do projeto e execute os seguintes comandos:
 
-### Desinstalar Pacotes do Firebase:
+### Desinstalar Pacotes do Database:
 ```bash
-npm uninstall firebase firebase-admin
+npm uninstall database database-admin
 ```
 
 ### Instalar Novas Dependências:
@@ -26,11 +26,11 @@ npm install -D @types/jsonwebtoken @types/bcrypt
 ```
 
 ### Arquivos a serem Removidos do Projeto:
-Você pode excluir com segurança os seguintes arquivos de configuração do Firebase:
-* `firebase-applet-config.json`
-* `firebase-blueprint.json`
+Você pode excluir com segurança os seguintes arquivos de configuração do Database:
+* `database-applet-config.json`
+* `database-blueprint.json`
 * `firestore.rules`
-* `/src/firebase.ts`
+* `/src/database.ts`
 
 ---
 

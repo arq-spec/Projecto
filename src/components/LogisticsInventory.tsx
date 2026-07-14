@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { InventoryItem, DimensionDetails, UserProfile } from '../types';
-import { loadFromFirebase, saveToFirebase } from '../firebase';
+import { loadFromDatabase, saveToDatabase } from '../database';
 import { 
   Boxes, 
   Plus, 
@@ -169,18 +169,18 @@ export default function LogisticsInventory({ currentUser }: LogisticsInventoryPr
     return saved ? JSON.parse(saved) : initialInventory;
   })());
 
-  // Sync initial state from Firebase on mount
+  // Sync initial state from Database on mount
   useEffect(() => {
     async function loadInventory() {
       try {
-        const dbItems = await loadFromFirebase('inventory');
+        const dbItems = await loadFromDatabase('inventory');
         if (dbItems !== null) {
           setItems(dbItems);
           lastDbValueRef.current = dbItems;
         }
         isLoadedRef.current = true;
       } catch (err) {
-        console.warn("Failed to load inventory from Firebase", err);
+        console.warn("Failed to load inventory from Database", err);
       } finally {
         setDbLoaded(true);
       }
@@ -245,7 +245,7 @@ export default function LogisticsInventory({ currentUser }: LogisticsInventoryPr
     localStorage.setItem('freelance_management_inventory_v1', JSON.stringify(items));
     if (JSON.stringify(items) !== JSON.stringify(lastDbValueRef.current)) {
       lastDbValueRef.current = items;
-      saveToFirebase('inventory', items);
+      saveToDatabase('inventory', items);
     }
   }, [items, dbLoaded]);
 
